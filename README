@@ -19,3 +19,5 @@ int main(int argc, char** argv)
 Version history:
 
 2011-11-15: - Initial github release.
+
+Copyright (C) 2011 Connected Table AB <info@connectedtable.com>
