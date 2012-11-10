@@ -15,9 +15,6 @@
 #include <qelapsedtimer.h>
 
 #include "qeventdispatcher_epoll.h"
-#include <private/qthread_p.h>
-#include <private/qcoreapplication_p.h>
-#include <private/qcore_unix_p.h>
 
 #include <errno.h>
 #include <stdio.h>
@@ -26,13 +23,71 @@
 
 #include <QDebug>
 
+#if defined(Q_OS_LINUX) && defined(O_CLOEXEC)
+# define QT_UNIX_SUPPORTS_THREADSAFE_CLOEXEC 1
+QT_BEGIN_NAMESPACE
+namespace QtLibcSupplement {
+    inline int pipe2(int [], int) { errno = ENOSYS; return -1; }
+}
+QT_END_NAMESPACE
+using namespace QT_PREPEND_NAMESPACE(QtLibcSupplement);
+
+#else
+# define QT_UNIX_SUPPORTS_THREADSAFE_CLOEXEC 0
+#endif
+
+static inline int qt_safe_pipe(int pipefd[2], int flags = 0)
+{
+    int ret;
+#if QT_UNIX_SUPPORTS_THREADSAFE_CLOEXEC && defined(O_CLOEXEC)
+    flags |= O_CLOEXEC;
+    ret = ::pipe2(pipefd, flags);
+    if (ret == 0 || errno != ENOSYS)
+        return ret;
+#endif
+
+    ret = ::pipe(pipefd);
+    if (ret == -1)
+        return -1;
+
+    ::fcntl(pipefd[0], F_SETFD, FD_CLOEXEC);
+    ::fcntl(pipefd[1], F_SETFD, FD_CLOEXEC);
+
+    if (flags & O_NONBLOCK) {
+        ::fcntl(pipefd[0], F_SETFL, ::fcntl(pipefd[0], F_GETFL) | O_NONBLOCK);
+        ::fcntl(pipefd[1], F_SETFL, ::fcntl(pipefd[1], F_GETFL) | O_NONBLOCK);
+    }
+
+    return 0;
+}
+
+static inline qint64 qt_safe_read(int fd, void *data, qint64 maxlen)
+{
+    qint64 ret = 0;
+    do {
+        ret = QT_READ(fd, data, maxlen);
+    } while (ret == -1 && errno == EINTR);
+    return ret;
+}
+
+static inline qint64 qt_safe_write(int fd, const void *data, qint64 len)
+{
+    qint64 ret = 0;
+    do {
+        ret = QT_WRITE(fd, data, len);
+    } while (ret == -1 && errno == EINTR);
+    return ret;
+}
+
+
 QT_BEGIN_NAMESPACE
 
 /*****************************************************************************
  UNIX signal handling
  *****************************************************************************/
 
-QEventDispatcherEpollPrivate::QEventDispatcherEpollPrivate()
+QEventDispatcherEpollPrivate::QEventDispatcherEpollPrivate(QEventDispatcherEpoll *const q)
+    : q_ptr(q)
 {
     epollFD = epoll_create(16384);
 //    qDebug() << "epollFD =" << epollFD;
@@ -56,8 +111,6 @@ QEventDispatcherEpollPrivate::QEventDispatcherEpollPrivate()
     ev.events = EPOLLIN;//| EPOLLOUT | EPOLLPRI;
     int rc = epoll_ctl(epollFD, EPOLL_CTL_ADD, thread_pipe[0], &ev);
     if( rc != 0 ) perror("QEventDispatcherEpollPrivate::doSelect(), epoll_ctl failed: ");
-
-    //sn_highest = -1;
 
     interrupt = false;
 }
@@ -135,17 +188,11 @@ int QEventDispatcherEpollPrivate::doSelect(QEventLoop::ProcessEventsFlags flags,
 }
 
 QEventDispatcherEpoll::QEventDispatcherEpoll(QObject *parent)
-    : QAbstractEventDispatcher(*new QEventDispatcherEpollPrivate, parent)
-{ }
-
-QEventDispatcherEpoll::QEventDispatcherEpoll(QEventDispatcherEpollPrivate &dd, QObject *parent)
-    : QAbstractEventDispatcher(dd, parent)
+    : QAbstractEventDispatcher(parent), d_ptr(new QEventDispatcherEpollPrivate(this))
 { }
 
 QEventDispatcherEpoll::~QEventDispatcherEpoll()
 {
-    Q_D(QEventDispatcherEpoll);
-    d->threadData->eventDispatcher = 0;
 }
 
 /*!
@@ -384,16 +431,15 @@ bool QEventDispatcherEpoll::processEvents(QEventLoop::ProcessEventsFlags flags)
     d->interrupt = false;
 
     // we are awake, broadcast it
-    emit awake();
-    QCoreApplicationPrivate::sendPostedEvents(0, 0, d->threadData);
+    Q_EMIT awake();
+    QCoreApplication::sendPostedEvents();
 
     int nevents = 0;
-    const bool canWait = (d->threadData->canWait
-                          && !d->interrupt
+    const bool canWait = (!d->interrupt
                           && (flags & QEventLoop::WaitForMoreEvents));
 
     if (canWait)
-        emit aboutToBlock();
+        Q_EMIT aboutToBlock();
 
     if (!d->interrupt) {
         // return the maximum time we can wait for an event.
