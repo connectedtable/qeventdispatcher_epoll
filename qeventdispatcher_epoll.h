@@ -11,10 +11,9 @@
 
 #include <QtCore/qabstracteventdispatcher.h>
 #include <QtCore/qlist.h>
-#include <private/qabstracteventdispatcher_p.h>
-#include <private/qcore_unix_p.h>
-#include <private/qpodlist_p.h>
 #include <QtCore/qvarlengtharray.h>
+#include <QtCore/qhash.h>
+
 
 struct epoll_event;
 
@@ -91,7 +90,7 @@ public:
     void flush();
 
 protected:
-    QEventDispatcherEpoll(QEventDispatcherEpollPrivate &dd, QObject *parent = 0);
+    QScopedPointer<QEventDispatcherEpollPrivate> d_ptr;
 
 //    void setSocketNotifierPending(QSocketNotifier *notifier);
 
@@ -100,12 +99,12 @@ protected:
 
 };
 
-class Q_CORE_EXPORT QEventDispatcherEpollPrivate : public QAbstractEventDispatcherPrivate
+class Q_CORE_EXPORT QEventDispatcherEpollPrivate
 {
     Q_DECLARE_PUBLIC(QEventDispatcherEpoll)
-
+    QEventDispatcherEpoll* const q_ptr;
 public:
-    QEventDispatcherEpollPrivate();
+    QEventDispatcherEpollPrivate(QEventDispatcherEpoll* const q);
     ~QEventDispatcherEpollPrivate();
 
     int doSelect(QEventLoop::ProcessEventsFlags flags, timeval *timeout);
@@ -113,8 +112,6 @@ public:
     bool mainThread;
     int thread_pipe[2];
 
-    // highest fd for all socket notifiers
-    int sn_highest;
     // 3 socket notifier types - read, write and exception
     //QSockNotType sn_vec[3];
 
