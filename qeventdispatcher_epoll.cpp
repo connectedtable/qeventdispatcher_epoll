@@ -15,7 +15,6 @@
 #include <qelapsedtimer.h>
 
 #include "qeventdispatcher_epoll.h"
-#include <private/qcore_unix_p.h>
 
 #include <errno.h>
 #include <stdio.h>
@@ -23,6 +22,46 @@
 #include <sys/epoll.h>
 
 #include <QDebug>
+
+#if !defined(NO_PRIVATE_HEADERS)
+#include <private/qcore_unix_p.h>
+#else
+static inline int qt_safe_pipe(int pipefd[2], int flags = 0)
+{
+    int ret = ::pipe(pipefd);
+    if (ret == -1)
+        return -1;
+
+    ::fcntl(pipefd[0], F_SETFD, FD_CLOEXEC);
+    ::fcntl(pipefd[1], F_SETFD, FD_CLOEXEC);
+
+    if (flags & O_NONBLOCK) {
+        ::fcntl(pipefd[0], F_SETFL, ::fcntl(pipefd[0], F_GETFL) | O_NONBLOCK);
+        ::fcntl(pipefd[1], F_SETFL, ::fcntl(pipefd[1], F_GETFL) | O_NONBLOCK);
+    }
+
+    return 0;
+}
+
+static inline qint64 qt_safe_read(int fd, void *data, qint64 maxlen)
+{
+    qint64 ret = 0;
+    do {
+        ret = QT_READ(fd, data, maxlen);
+    } while (ret == -1 && errno == EINTR);
+    return ret;
+}
+
+static inline qint64 qt_safe_write(int fd, const void *data, qint64 len)
+{
+    qint64 ret = 0;
+    do {
+        ret = QT_WRITE(fd, data, len);
+    } while (ret == -1 && errno == EINTR);
+    return ret;
+}
+
+#endif // !defined(NO_PRIVATE_HEADERS)
 
 QT_BEGIN_NAMESPACE
 
