@@ -15,8 +15,6 @@
 #include <qelapsedtimer.h>
 
 #include "qeventdispatcher_epoll.h"
-#include <private/qthread_p.h>
-#include <private/qcoreapplication_p.h>
 #include <private/qcore_unix_p.h>
 
 #include <errno.h>
@@ -32,7 +30,8 @@ QT_BEGIN_NAMESPACE
  UNIX signal handling
  *****************************************************************************/
 
-QEventDispatcherEpollPrivate::QEventDispatcherEpollPrivate()
+QEventDispatcherEpollPrivate::QEventDispatcherEpollPrivate(QEventDispatcherEpoll* const q)
+    : q_ptr(q)
 {
     epollFD = epoll_create(16384);
 //    qDebug() << "epollFD =" << epollFD;
@@ -124,17 +123,11 @@ int QEventDispatcherEpollPrivate::doSelect(QEventLoop::ProcessEventsFlags flags,
 }
 
 QEventDispatcherEpoll::QEventDispatcherEpoll(QObject *parent)
-    : QAbstractEventDispatcher(*new QEventDispatcherEpollPrivate, parent)
-{ }
-
-QEventDispatcherEpoll::QEventDispatcherEpoll(QEventDispatcherEpollPrivate &dd, QObject *parent)
-    : QAbstractEventDispatcher(dd, parent)
+    : QAbstractEventDispatcher(parent), d_ptr(new QEventDispatcherEpollPrivate(this))
 { }
 
 QEventDispatcherEpoll::~QEventDispatcherEpoll()
 {
-    Q_D(QEventDispatcherEpoll);
-    d->threadData->eventDispatcher = 0;
 }
 
 /*!
@@ -374,11 +367,10 @@ bool QEventDispatcherEpoll::processEvents(QEventLoop::ProcessEventsFlags flags)
 
     // we are awake, broadcast it
     Q_EMIT awake();
-    QCoreApplicationPrivate::sendPostedEvents(0, 0, d->threadData);
+    QCoreApplication::sendPostedEvents();
 
     int nevents = 0;
-    const bool canWait = (d->threadData->canWait
-                          && !d->interrupt
+    const bool canWait = (!d->interrupt
                           && (flags & QEventLoop::WaitForMoreEvents));
 
     if (canWait)
