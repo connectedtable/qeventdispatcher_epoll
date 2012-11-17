@@ -94,7 +94,7 @@ int QEventDispatcherEpollPrivate::doSelect(QEventLoop::ProcessEventsFlags flags,
     } while (nsel == -1 && (errno == EINTR || errno == EAGAIN));
 
     if (nsel == -1) {
-        // EINVAL... shouldn't happen, so let's complain to stderr
+        // shouldn't happen, so let's complain to stderr
         // and hope someone sends us a bug report
         perror("epoll_wait()");
     }
