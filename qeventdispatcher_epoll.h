@@ -110,11 +110,8 @@ public:
 
     int doSelect(QEventLoop::ProcessEventsFlags flags, timeval *timeout);
 
-    bool mainThread;
     int thread_pipe[2];
 
-    // highest fd for all socket notifiers
-    int sn_highest;
     // 3 socket notifier types - read, write and exception
     //QSockNotType sn_vec[3];
 
