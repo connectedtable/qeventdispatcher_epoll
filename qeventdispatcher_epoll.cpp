@@ -384,7 +384,7 @@ bool QEventDispatcherEpoll::processEvents(QEventLoop::ProcessEventsFlags flags)
     d->interrupt = false;
 
     // we are awake, broadcast it
-    emit awake();
+    Q_EMIT awake();
     QCoreApplicationPrivate::sendPostedEvents(0, 0, d->threadData);
 
     int nevents = 0;
@@ -393,7 +393,7 @@ bool QEventDispatcherEpoll::processEvents(QEventLoop::ProcessEventsFlags flags)
                           && (flags & QEventLoop::WaitForMoreEvents));
 
     if (canWait)
-        emit aboutToBlock();
+        Q_EMIT aboutToBlock();
 
     if (!d->interrupt) {
         // return the maximum time we can wait for an event.
