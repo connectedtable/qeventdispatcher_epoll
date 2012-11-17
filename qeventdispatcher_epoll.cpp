@@ -37,18 +37,16 @@ QEventDispatcherEpollPrivate::QEventDispatcherEpollPrivate()
     epollFD = epoll_create(16384);
 //    qDebug() << "epollFD =" << epollFD;
 
-    //mainThread = (QThread::currentThread() == QCoreApplication::instance()->thread());
-    mainThread = true;
     bool pipefail = false;
 
     // initialize the common parts of the event loop
     if (qt_safe_pipe(thread_pipe, O_NONBLOCK) == -1) {
-        perror("QEventDispatcherUNIXPrivate(): Unable to create thread pipe");
+        perror("QEventDispatcherEpollPrivate(): Unable to create thread pipe");
         pipefail = true;
     }
 
     if (pipefail)
-        qFatal("QEventDispatcherUNIXPrivate(): Can not continue without a thread pipe");
+        qFatal("QEventDispatcherEpollPrivate(): Can not continue without a thread pipe");
 
     epoll_event ev;
     memset(&ev,0,sizeof(ev));
@@ -56,8 +54,6 @@ QEventDispatcherEpollPrivate::QEventDispatcherEpollPrivate()
     ev.events = EPOLLIN;//| EPOLLOUT | EPOLLPRI;
     int rc = epoll_ctl(epollFD, EPOLL_CTL_ADD, thread_pipe[0], &ev);
     if( rc != 0 ) perror("QEventDispatcherEpollPrivate::doSelect(), epoll_ctl failed: ");
-
-    //sn_highest = -1;
 
     interrupt = false;
 }
@@ -98,16 +94,9 @@ int QEventDispatcherEpollPrivate::doSelect(QEventLoop::ProcessEventsFlags flags,
     } while (nsel == -1 && (errno == EINTR || errno == EAGAIN));
 
     if (nsel == -1) {
-        if (errno == EBADF) {
-            // it seems a socket notifier has a bad fd... find out
-            // which one it is and disable it
-            qWarning("EBADF handling not implemented!");
-            // TODO
-        } else {
-            // EINVAL... shouldn't happen, so let's complain to stderr
-            // and hope someone sends us a bug report
-            perror("epoll_wait()");
-        }
+        // EINVAL... shouldn't happen, so let's complain to stderr
+        // and hope someone sends us a bug report
+        perror("epoll_wait()");
     }
 
     // some other thread woke us up... consume the data on the thread pipe so that
@@ -120,7 +109,7 @@ int QEventDispatcherEpollPrivate::doSelect(QEventLoop::ProcessEventsFlags flags,
                 ;
             if (!wakeUps.testAndSetRelease(1, 0)) {
                 // hopefully, this is dead code
-                qWarning("QEventDispatcherUNIX: internal error, wakeUps.testAndSetRelease(1, 0) failed!");
+                qWarning("QEventDispatcherEpoll: internal error, wakeUps.testAndSetRelease(1, 0) failed!");
             }
             ++nevents;
             break;
@@ -155,7 +144,7 @@ void QEventDispatcherEpoll::registerTimer(int timerId, int interval, QObject *ob
 {
 #ifndef QT_NO_DEBUG
     if (timerId < 1 || interval < 0 || !obj) {
-        qWarning("QEventDispatcherUNIX::registerTimer: invalid arguments");
+        qWarning("QEventDispatcherEpoll::registerTimer: invalid arguments");
         return;
     } else if (obj->thread() != thread() || thread() != QThread::currentThread()) {
         qWarning("QObject::startTimer: timers cannot be started from another thread");
@@ -174,7 +163,7 @@ bool QEventDispatcherEpoll::unregisterTimer(int timerId)
 {
 #ifndef QT_NO_DEBUG
     if (timerId < 1) {
-        qWarning("QEventDispatcherUNIX::unregisterTimer: invalid argument");
+        qWarning("QEventDispatcherEpoll::unregisterTimer: invalid argument");
         return false;
     } else if (thread() != QThread::currentThread()) {
         qWarning("QObject::killTimer: timers cannot be stopped from another thread");
@@ -193,7 +182,7 @@ bool QEventDispatcherEpoll::unregisterTimers(QObject *object)
 {
 #ifndef QT_NO_DEBUG
     if (!object) {
-        qWarning("QEventDispatcherUNIX::unregisterTimers: invalid argument");
+        qWarning("QEventDispatcherEpoll::unregisterTimers: invalid argument");
         return false;
     } else if (object->thread() != thread() || thread() != QThread::currentThread()) {
         qWarning("QObject::killTimers: timers cannot be stopped from another thread");
@@ -209,7 +198,7 @@ QList<QEventDispatcherEpoll::TimerInfo>
 QEventDispatcherEpoll::registeredTimers(QObject *object) const
 {
     if (!object) {
-        qWarning("QEventDispatcherUNIX:registeredTimers: invalid argument");
+        qWarning("QEventDispatcherEpoll::registeredTimers: invalid argument");
         return QList<TimerInfo>();
     }
 
