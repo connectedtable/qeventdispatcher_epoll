@@ -15,9 +15,6 @@
 #include <qelapsedtimer.h>
 
 #include "qeventdispatcher_epoll.h"
-#include <private/qthread_p.h>
-#include <private/qcoreapplication_p.h>
-#include <private/qcore_unix_p.h>
 
 #include <errno.h>
 #include <stdio.h>
@@ -26,29 +23,68 @@
 
 #include <QDebug>
 
+#if !defined(NO_PRIVATE_HEADERS)
+#include <private/qcore_unix_p.h>
+#else
+static inline int qt_safe_pipe(int pipefd[2], int flags = 0)
+{
+    int ret = ::pipe(pipefd);
+    if (ret == -1)
+        return -1;
+
+    ::fcntl(pipefd[0], F_SETFD, FD_CLOEXEC);
+    ::fcntl(pipefd[1], F_SETFD, FD_CLOEXEC);
+
+    if (flags & O_NONBLOCK) {
+        ::fcntl(pipefd[0], F_SETFL, ::fcntl(pipefd[0], F_GETFL) | O_NONBLOCK);
+        ::fcntl(pipefd[1], F_SETFL, ::fcntl(pipefd[1], F_GETFL) | O_NONBLOCK);
+    }
+
+    return 0;
+}
+
+static inline qint64 qt_safe_read(int fd, void *data, qint64 maxlen)
+{
+    qint64 ret = 0;
+    do {
+        ret = QT_READ(fd, data, maxlen);
+    } while (ret == -1 && errno == EINTR);
+    return ret;
+}
+
+static inline qint64 qt_safe_write(int fd, const void *data, qint64 len)
+{
+    qint64 ret = 0;
+    do {
+        ret = QT_WRITE(fd, data, len);
+    } while (ret == -1 && errno == EINTR);
+    return ret;
+}
+
+#endif // !defined(NO_PRIVATE_HEADERS)
+
 QT_BEGIN_NAMESPACE
 
 /*****************************************************************************
  UNIX signal handling
  *****************************************************************************/
 
-QEventDispatcherEpollPrivate::QEventDispatcherEpollPrivate()
+QEventDispatcherEpollPrivate::QEventDispatcherEpollPrivate(QEventDispatcherEpoll* const q)
+    : q_ptr(q)
 {
     epollFD = epoll_create(16384);
 //    qDebug() << "epollFD =" << epollFD;
 
-    //mainThread = (QThread::currentThread() == QCoreApplication::instance()->thread());
-    mainThread = true;
     bool pipefail = false;
 
     // initialize the common parts of the event loop
     if (qt_safe_pipe(thread_pipe, O_NONBLOCK) == -1) {
-        perror("QEventDispatcherUNIXPrivate(): Unable to create thread pipe");
+        perror("QEventDispatcherEpollPrivate(): Unable to create thread pipe");
         pipefail = true;
     }
 
     if (pipefail)
-        qFatal("QEventDispatcherUNIXPrivate(): Can not continue without a thread pipe");
+        qFatal("QEventDispatcherEpollPrivate(): Can not continue without a thread pipe");
 
     epoll_event ev;
     memset(&ev,0,sizeof(ev));
@@ -56,8 +92,6 @@ QEventDispatcherEpollPrivate::QEventDispatcherEpollPrivate()
     ev.events = EPOLLIN;//| EPOLLOUT | EPOLLPRI;
     int rc = epoll_ctl(epollFD, EPOLL_CTL_ADD, thread_pipe[0], &ev);
     if( rc != 0 ) perror("QEventDispatcherEpollPrivate::doSelect(), epoll_ctl failed: ");
-
-    //sn_highest = -1;
 
     interrupt = false;
 }
@@ -98,16 +132,9 @@ int QEventDispatcherEpollPrivate::doSelect(QEventLoop::ProcessEventsFlags flags,
     } while (nsel == -1 && (errno == EINTR || errno == EAGAIN));
 
     if (nsel == -1) {
-        if (errno == EBADF) {
-            // it seems a socket notifier has a bad fd... find out
-            // which one it is and disable it
-            qWarning("EBADF handling not implemented!");
-            // TODO
-        } else {
-            // EINVAL... shouldn't happen, so let's complain to stderr
-            // and hope someone sends us a bug report
-            perror("epoll_wait()");
-        }
+        // shouldn't happen, so let's complain to stderr
+        // and hope someone sends us a bug report
+        perror("epoll_wait()");
     }
 
     // some other thread woke us up... consume the data on the thread pipe so that
@@ -120,7 +147,7 @@ int QEventDispatcherEpollPrivate::doSelect(QEventLoop::ProcessEventsFlags flags,
                 ;
             if (!wakeUps.testAndSetRelease(1, 0)) {
                 // hopefully, this is dead code
-                qWarning("QEventDispatcherUNIX: internal error, wakeUps.testAndSetRelease(1, 0) failed!");
+                qWarning("QEventDispatcherEpoll: internal error, wakeUps.testAndSetRelease(1, 0) failed!");
             }
             ++nevents;
             break;
@@ -135,17 +162,11 @@ int QEventDispatcherEpollPrivate::doSelect(QEventLoop::ProcessEventsFlags flags,
 }
 
 QEventDispatcherEpoll::QEventDispatcherEpoll(QObject *parent)
-    : QAbstractEventDispatcher(*new QEventDispatcherEpollPrivate, parent)
-{ }
-
-QEventDispatcherEpoll::QEventDispatcherEpoll(QEventDispatcherEpollPrivate &dd, QObject *parent)
-    : QAbstractEventDispatcher(dd, parent)
+    : QAbstractEventDispatcher(parent), d_ptr(new QEventDispatcherEpollPrivate(this))
 { }
 
 QEventDispatcherEpoll::~QEventDispatcherEpoll()
 {
-    Q_D(QEventDispatcherEpoll);
-    d->threadData->eventDispatcher = 0;
 }
 
 /*!
@@ -155,7 +176,7 @@ void QEventDispatcherEpoll::registerTimer(int timerId, int interval, QObject *ob
 {
 #ifndef QT_NO_DEBUG
     if (timerId < 1 || interval < 0 || !obj) {
-        qWarning("QEventDispatcherUNIX::registerTimer: invalid arguments");
+        qWarning("QEventDispatcherEpoll::registerTimer: invalid arguments");
         return;
     } else if (obj->thread() != thread() || thread() != QThread::currentThread()) {
         qWarning("QObject::startTimer: timers cannot be started from another thread");
@@ -174,7 +195,7 @@ bool QEventDispatcherEpoll::unregisterTimer(int timerId)
 {
 #ifndef QT_NO_DEBUG
     if (timerId < 1) {
-        qWarning("QEventDispatcherUNIX::unregisterTimer: invalid argument");
+        qWarning("QEventDispatcherEpoll::unregisterTimer: invalid argument");
         return false;
     } else if (thread() != QThread::currentThread()) {
         qWarning("QObject::killTimer: timers cannot be stopped from another thread");
@@ -193,7 +214,7 @@ bool QEventDispatcherEpoll::unregisterTimers(QObject *object)
 {
 #ifndef QT_NO_DEBUG
     if (!object) {
-        qWarning("QEventDispatcherUNIX::unregisterTimers: invalid argument");
+        qWarning("QEventDispatcherEpoll::unregisterTimers: invalid argument");
         return false;
     } else if (object->thread() != thread() || thread() != QThread::currentThread()) {
         qWarning("QObject::killTimers: timers cannot be stopped from another thread");
@@ -209,7 +230,7 @@ QList<QEventDispatcherEpoll::TimerInfo>
 QEventDispatcherEpoll::registeredTimers(QObject *object) const
 {
     if (!object) {
-        qWarning("QEventDispatcherUNIX:registeredTimers: invalid argument");
+        qWarning("QEventDispatcherEpoll::registeredTimers: invalid argument");
         return QList<TimerInfo>();
     }
 
@@ -384,16 +405,15 @@ bool QEventDispatcherEpoll::processEvents(QEventLoop::ProcessEventsFlags flags)
     d->interrupt = false;
 
     // we are awake, broadcast it
-    emit awake();
-    QCoreApplicationPrivate::sendPostedEvents(0, 0, d->threadData);
+    Q_EMIT awake();
+    QCoreApplication::sendPostedEvents();
 
     int nevents = 0;
-    const bool canWait = (d->threadData->canWait
-                          && !d->interrupt
+    const bool canWait = (!d->interrupt
                           && (flags & QEventLoop::WaitForMoreEvents));
 
     if (canWait)
-        emit aboutToBlock();
+        Q_EMIT aboutToBlock();
 
     if (!d->interrupt) {
         // return the maximum time we can wait for an event.
