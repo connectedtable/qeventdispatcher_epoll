@@ -14,10 +14,15 @@
 #include <QtCore/qlist.h>
 #include <QtCore/qsocketnotifier.h>
 
+#if QT_VERSION >= 0x050000
+#include <private/qtimerinfo_unix_p.h>
+#endif
+
 struct epoll_event;
 
 QT_BEGIN_NAMESPACE
 
+#if QT_VERSION < 0x050000
 // internal timer info
 struct QTimerInfo {
     int id;           // - timer identifier
@@ -62,6 +67,8 @@ public:
     int activateTimers();
 };
 
+#endif
+
 class QEventDispatcherEpollPrivate;
 
 class Q_CORE_EXPORT QEventDispatcherEpoll : public QAbstractEventDispatcher
@@ -79,7 +86,12 @@ public:
     void registerSocketNotifier(QSocketNotifier *notifier);
     void unregisterSocketNotifier(QSocketNotifier *notifier);
 
-    void registerTimer(int timerId, int interval, QObject *object);
+#if QT_VERSION < 0x050000
+    void registerTimer(int timerId, int interval, QObject *obj);
+#else
+    void registerTimer(int timerId, int interval, Qt::TimerType timerType, QObject *obj);
+    int remainingTime(int timerId);
+#endif
     bool unregisterTimer(int timerId);
     bool unregisterTimers(QObject *object);
     QList<TimerInfo> registeredTimers(QObject *object) const;

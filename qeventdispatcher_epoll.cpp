@@ -169,6 +169,7 @@ QEventDispatcherEpoll::~QEventDispatcherEpoll()
 {
 }
 
+#if QT_VERSION < 0x050000
 /*!
     \internal
 */
@@ -187,6 +188,32 @@ void QEventDispatcherEpoll::registerTimer(int timerId, int interval, QObject *ob
     Q_D(QEventDispatcherEpoll);
     d->timerList.registerTimer(timerId, interval, obj);
 }
+
+#else // #if QT_VERSION < 0x050000
+
+void QEventDispatcherEpoll::registerTimer(int timerId, int interval, Qt::TimerType timerType, QObject *obj)
+{
+#ifndef QT_NO_DEBUG
+    if (timerId < 1 || interval < 0 || !obj) {
+        qWarning("QEventDispatcherEpoll::registerTimer: invalid arguments");
+        return;
+    } else if (obj->thread() != thread() || thread() != QThread::currentThread()) {
+        qWarning("QObject::startTimer: timers cannot be started from another thread");
+        return;
+    }
+#endif
+
+    Q_D(QEventDispatcherEpoll);
+    d->timerList.registerTimer(timerId, interval, timerType, obj);
+}
+
+int QEventDispatcherEpoll::remainingTime(int timerId)
+{
+    Q_D(QEventDispatcherEpoll);
+    return d->timerList.timerRemainingTime(timerId);
+}
+
+#endif // QT_VERSION < 0x050000
 
 /*!
     \internal
