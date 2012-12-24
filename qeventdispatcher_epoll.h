@@ -10,8 +10,9 @@
 #define QEVENTDISPATCHER_EPOLL
 
 #include <QtCore/qabstracteventdispatcher.h>
+#include <QtCore/qhash.h>
 #include <QtCore/qlist.h>
-#include <private/qabstracteventdispatcher_p.h>
+#include <QtCore/qsocketnotifier.h>
 
 struct epoll_event;
 
