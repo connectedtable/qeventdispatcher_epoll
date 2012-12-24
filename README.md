@@ -4,10 +4,11 @@ Increased performance and lower cpu usage over the default select() based
 dispatcher on certain types of applications, such as a server that handles
 a lot of concurrent tcp connections.
 
-Usage:
+Usage (Qt 4):
 Simply include the header file and define an epoll event dispatcher in main
 before creating the Qt application object.
 
+```c++
 int main(int argc, char** argv)
 {
     QEventDispatcherEpoll epollDispatcher;
@@ -15,6 +16,28 @@ int main(int argc, char** argv)
     ...
     return app.exec();
 }
+```
+
+Usage (Qt 5):
+
+Simply include the header file and define an epoll event dispatcher in main
+before creating the Qt application object.
+
+```c++
+int main(int argc, char** argv)
+{
+    QCoreApplication::setEventDispatcher(new QEventDispatcherEpoll);
+    QCoreApplication app(argc, argv);
+    ...
+    return app.exec();
+}
+```
+
+and add this line to `.pro` file:
+
+```
+QT += core-private
+```
 
 Version history:
 
