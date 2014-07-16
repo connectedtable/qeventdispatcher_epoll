@@ -118,7 +118,11 @@ public:
     QEventDispatcherEpollPrivate(QEventDispatcherEpoll* const q);
     ~QEventDispatcherEpollPrivate();
 
+#if QT_VERSION >= 0x050200
+    int doSelect(QEventLoop::ProcessEventsFlags flags, timespec *timeout);
+#else
     int doSelect(QEventLoop::ProcessEventsFlags flags, timeval *timeout);
+#endif
 
     int thread_pipe[2];
 
