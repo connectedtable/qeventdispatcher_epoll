@@ -110,7 +110,11 @@ QEventDispatcherEpollPrivate::~QEventDispatcherEpollPrivate()
 
 #define EVENT_COUNT 100
 
+#if QT_VERSION >= 0x050200
+int QEventDispatcherEpollPrivate::doSelect(QEventLoop::ProcessEventsFlags flags, timespec *timeout)
+#else
 int QEventDispatcherEpollPrivate::doSelect(QEventLoop::ProcessEventsFlags flags, timeval *timeout)
+#endif
 {
     Q_Q(QEventDispatcherEpoll);
 
@@ -125,7 +129,11 @@ int QEventDispatcherEpollPrivate::doSelect(QEventLoop::ProcessEventsFlags flags,
     int nevents = 0;
     do {
         if(timeout)
+#if QT_VERSION >= 0x050200
+            nsel = epoll_wait(epollFD, events, EVENT_COUNT, timeout->tv_sec * 1000 + timeout->tv_nsec / 1000000);
+#else
             nsel = epoll_wait(epollFD, events, EVENT_COUNT, timeout->tv_sec * 1000 + timeout->tv_usec / 1000);
+#endif
         else // timeout == NULL means wait indefinitely for select(), -1 does the same for epoll_wait()
             nsel = epoll_wait(epollFD, events, EVENT_COUNT, -1);
         //qDebug() << "nsel after epoll_wait =" << nsel;
@@ -444,8 +452,13 @@ bool QEventDispatcherEpoll::processEvents(QEventLoop::ProcessEventsFlags flags)
 
     if (!d->interrupt) {
         // return the maximum time we can wait for an event.
+#if QT_VERSION >= 0x050200
+        timespec *tm = 0;
+        timespec wait_tm = { 0l, 0l };
+#else
         timeval *tm = 0;
         timeval wait_tm = { 0l, 0l };
+#endif
         if (!(flags & QEventLoop::X11ExcludeTimers)) {
             if (d->timerList.timerWait(wait_tm))
                 tm = &wait_tm;
@@ -457,7 +470,11 @@ bool QEventDispatcherEpoll::processEvents(QEventLoop::ProcessEventsFlags flags)
 
             // no time to wait
             tm->tv_sec  = 0l;
+#if QT_VERSION >= 0x050200
+            tm->tv_nsec = 0l;
+#else
             tm->tv_usec = 0l;
+#endif
         }
 
         nevents = d->doSelect(flags, tm);
